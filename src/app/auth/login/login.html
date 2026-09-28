@@ -1,4 +1,4 @@
-<form novalidate (submit)="onSubmit($event)">
+<form [formRoot]="loginForm">
   <label for="email">Email</label>
   <input
     id="email"
@@ -29,5 +29,10 @@
     </p>
   }
 
-  <button type="submit">Login</button>
+  @if (loginForm().errors().length > 0) {
+    <p role="alert">
+      {{ loginForm().errors()[0].message }}
+    </p>
+  }
+  <button [disabled]="loginForm().submitting()" type="submit">Login</button>
 </form>
