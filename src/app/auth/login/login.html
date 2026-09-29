@@ -1,0 +1,38 @@
+<form [formRoot]="loginForm">
+  <label for="email">Email</label>
+  <input
+    id="email"
+    type="email"
+    autocomplete="email"
+    [formField]="loginForm.email"
+    [attr.aria-invalid]="loginForm.email().invalid()"
+    aria-describedby="email-error"
+  />
+  @if (loginForm.email().touched() && loginForm.email().invalid()) {
+    <p id="email-error" role="alert">
+      {{ loginForm.email().errors()[0].message }}
+    </p>
+  }
+
+  <label for="password">Password</label>
+  <input
+    id="password"
+    type="password"
+    autocomplete="current-password"
+    [formField]="loginForm.password"
+    [attr.aria-invalid]="loginForm.password().invalid()"
+    aria-describedby="password-error"
+  />
+  @if (loginForm.password().touched() && loginForm.password().invalid()) {
+    <p id="password-error" role="alert">
+      {{ loginForm.password().errors()[0].message }}
+    </p>
+  }
+
+  @if (loginForm().errors().length > 0) {
+    <p role="alert">
+      {{ loginForm().errors()[0].message }}
+    </p>
+  }
+  <button [disabled]="loginForm().submitting()" type="submit">Login</button>
+</form>
