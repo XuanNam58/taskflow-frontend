@@ -1,6 +1,8 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { AuthApi } from '../auth-api';
 import { Login } from './login';
+import { throwError } from 'rxjs';
+import { HttpErrorResponse } from '@angular/common/http';
 
 describe('Login', () => {
   let component: Login;
@@ -32,5 +34,28 @@ describe('Login', () => {
 
     expect(authApi.login).not.toHaveBeenCalled();
     expect(fixture.nativeElement.querySelectorAll('[role="alert"]').length).toBe(2);
+  });
+
+  it('should show credentials error when API returns AUTH_001', async () => {
+    const form: HTMLFormElement = fixture.nativeElement.querySelector('form');
+    component.loginModel.set({ email: 'test@example.com', password: 'wrong' });
+    authApi.login.mockReturnValue(
+      throwError(
+        () =>
+          new HttpErrorResponse({
+            status: 401,
+            error: { code: 'AUTH_001' },
+          }),
+      ),
+    );
+
+    form.dispatchEvent(new Event('submit'));
+    await fixture.whenStable();
+
+    expect(authApi.login).toHaveBeenCalledWith({ email: 'test@example.com', password: 'wrong' });
+    expect(fixture.nativeElement.querySelectorAll('[role="alert"]').length).toBe(1);
+    expect(fixture.nativeElement.querySelector('[role="alert"]').textContent).toContain(
+      'Invalid email or password',
+    );
   });
 });
