@@ -1,38 +1,38 @@
-# AuthStore và refresh token qua cookie httpOnly
+# AuthStore and an httpOnly refresh-token cookie
 
-- Ngày: 2026-10-04
-- Trạng thái: chờ duyệt
-- Repo bị ảnh hưởng: `taskflow-backend`, `taskflow-frontend`
+- Date: 2026-10-04
+- Status: backend done (XuanNam58/taskflow-backend#9, #10); frontend approved, not started
+- Repositories: `taskflow-backend`, `taskflow-frontend`
 
-## Mục tiêu
+## Goal
 
-Sau khi đăng nhập, app nhớ được người dùng là ai, kể cả khi reload trang, mà không để lộ refresh token cho JavaScript.
+After login, the app knows who the user is, including after a page reload, without exposing the refresh token to JavaScript.
 
-## Hiện trạng
+## Before this slice
 
-- `POST /api/auth/login` trả `{ accessToken, refreshToken }` trong JSON body.
-- `/refresh` và `/logout` nhận refresh token trong body.
-- Access token sống 15 phút, refresh token sống 30 ngày, có rotation. Token đã rotate bị từ chối (`401 AUTH_006`), nhưng **chưa có phát hiện tái sử dụng**: token mới thay thế nó vẫn hợp lệ. Việc này nằm trong backlog bắt buộc trước khi deploy công khai.
-- `GET /api/users/me` cần header `Authorization: Bearer <access token>`.
-- Frontend: `Login` gọi `AuthApi.login()` rồi `console.log` token. Token chưa được lưu ở đâu.
-- Backend tắt CSRF (`csrf.disable()`), chạy stateless.
+- `POST /api/auth/login` returned `{ accessToken, refreshToken }` in the JSON body.
+- `/refresh` and `/logout` took the refresh token in the request body.
+- Access tokens live 15 minutes, refresh tokens 30 days, with rotation. A rotated token is rejected (`401 AUTH_006`), but **there is no reuse detection**: the token that replaced it stays valid. Reuse detection is in the backlog gated before the first public deployment.
+- `GET /api/users/me` requires `Authorization: Bearer <access token>`.
+- Frontend: `Login` calls `AuthApi.login()` and logs the tokens to the console. Tokens are not stored anywhere.
+- The backend disables CSRF (`csrf.disable()`) and is stateless.
 
-## Phạm vi
+## Scope
 
-| Có trong slice này | Để slice sau |
+| In this slice | Later slices |
 |---|---|
-| Refresh token chuyển sang cookie `httpOnly` | Tự refresh khi gặp 401, xử lý các mã `AUTH_00x` |
-| `AuthStore`: access token trong memory, `currentUser`, `isAuthenticated` | Logout ở frontend |
-| Khôi phục phiên khi khởi động app | `AuthGuard` |
-| Interceptor tối giản: gắn header `Authorization` | Timeout cho request khởi động |
-| `Login` lưu vào store và chuyển trang | Triển khai frontend, backend ở hai domain khác nhau |
-| `Home` tối giản tại route `''` | |
+| Refresh token moves to an `httpOnly` cookie | Automatic refresh on 401, handling of `AUTH_00x` codes |
+| `AuthStore`: access token in memory, `currentUser`, `isAuthenticated` | Frontend logout |
+| Session restore on app start | `AuthGuard` |
+| Minimal interceptor: attach the `Authorization` header | Timeout for the startup requests |
+| `Login` stores the session and navigates | Frontend and backend on different domains |
+| Minimal `Home` at route `''` | |
 
-## Phần 1: Backend
+## Part 1: Backend
 
-### Nguyên tắc
+### Principle
 
-Cookie là chi tiết của tầng HTTP, nên chỉ `AuthController` biết đến cookie. `AuthService` giữ nguyên: vẫn nhận `RefreshTokenRequest`, `LogoutRequest` và trả về cặp token. Controller đọc cookie để dựng DTO cho service, và tách refresh token từ kết quả của service để ghi vào cookie.
+Cookies are an HTTP-layer detail, so only `AuthController` knows about them. `AuthService` is unchanged: it still takes `RefreshTokenRequest` and `LogoutRequest` and returns a token pair. The controller reads the cookie to build the service DTO, and splits the refresh token out of the service result to write the cookie.
 
 ### Cookie
 
@@ -40,118 +40,118 @@ Cookie là chi tiết của tầng HTTP, nên chỉ `AuthController` biết đ�
 refresh_token=<token>; HttpOnly; Secure; SameSite=Strict; Path=/api/auth; Max-Age=<refreshTokenExpiration>
 ```
 
-| Thuộc tính | Lý do |
+| Attribute | Reason |
 |---|---|
-| `HttpOnly` | JavaScript không đọc được, XSS không lấy được token |
-| `Secure` | Chỉ gửi qua HTTPS. Chrome và Firefox coi `http://localhost` là môi trường an toàn |
-| `SameSite=Strict` | Trang khác không làm trình duyệt gửi kèm cookie. Đây là lớp chống CSRF, nên giữ `csrf.disable()` |
-| `Path=/api/auth` | Cookie chỉ đi kèm request auth |
-| `Max-Age` | Lấy từ `JwtProperties.refreshTokenExpiration` có sẵn |
+| `HttpOnly` | JavaScript cannot read it, so XSS cannot steal the token |
+| `Secure` | Sent over HTTPS only. Chrome and Firefox treat `http://localhost` as a secure context |
+| `SameSite=Strict` | Other sites cannot make the browser send the cookie. This is the CSRF defence, so `csrf.disable()` stays |
+| `Path=/api/auth` | The cookie is sent with auth requests only |
+| `Max-Age` | Taken from the existing `JwtProperties.refreshTokenExpiration` |
 
-Dựng bằng `org.springframework.http.ResponseCookie`, không thêm thư viện.
+Built with `org.springframework.http.ResponseCookie`; no new dependency.
 
-Cookie xoá phải trùng `Path=/api/auth` với cookie đã ghi: trình duyệt nhận diện cookie theo name + domain + path (RFC 6265 §5.3, bước 11). Cookie ghi và cookie xoá dựng từ cùng một chỗ, chỉ khác `Max-Age`.
+The clearing cookie must carry the same `Path=/api/auth` as the cookie that was set: browsers identify a cookie by name, domain and path (RFC 6265 §5.3, step 11). Both are built in one place and differ only in `Max-Age`.
 
-### Endpoint
+### Endpoints
 
 | Endpoint | Request | Response |
 |---|---|---|
-| `POST /api/auth/login` | không đổi | ghi cookie, body `{ accessToken }` |
-| `POST /api/auth/refresh` | không có body, đọc cookie `refresh_token` | ghi cookie mới (rotation), body `{ accessToken }` |
-| `POST /api/auth/logout` | không có body, đọc cookie `refresh_token`, vẫn cần access token | xoá cookie bằng `Max-Age=0`, `204` |
-| `POST /api/auth/logout-all` | không đổi | xoá cookie bằng `Max-Age=0`, `204` |
-| `/register` | không đổi | không đổi |
+| `POST /api/auth/login` | unchanged | sets the cookie, body `{ accessToken }` |
+| `POST /api/auth/refresh` | no body, reads the `refresh_token` cookie | sets a new cookie (rotation), body `{ accessToken }` |
+| `POST /api/auth/logout` | no body, reads the `refresh_token` cookie, still requires an access token | clears the cookie with `Max-Age=0`, `204` |
+| `POST /api/auth/logout-all` | unchanged | clears the cookie with `Max-Age=0`, `204` |
+| `/register` | unchanged | unchanged |
 
-`/logout` phải sửa ngay trong slice này: frontend không còn đọc được refresh token để gửi qua body.
+`/logout` must change in this slice: the frontend can no longer read the refresh token to send it in a body.
 
-Khi `/logout` hoặc `/refresh` thất bại, response lỗi không xoá cookie. Cookie chết nằm lại đến hết `Max-Age`, lần khởi động sau nhận `401` và app ở trạng thái chưa đăng nhập. Chấp nhận trong slice này.
+When `/logout` or `/refresh` fails, the error response does not clear the cookie. The dead cookie stays until its `Max-Age` runs out; the next startup gets `401` and the app starts unauthenticated. Accepted for this slice.
 
-DTO mới: `AccessTokenResponse(String accessToken)`, dùng chung cho `/login` và `/refresh`. `RefreshTokenRequest` và `LogoutRequest` giữ lại cho service, controller tự dựng chúng từ cookie.
+New DTO: `AccessTokenResponse(String accessToken)`, shared by `/login` and `/refresh`. `RefreshTokenRequest` and `LogoutRequest` stay for the service; the controller builds them from the cookie.
 
-### Lỗi
+### Errors
 
-`/refresh` hoặc `/logout` không có cookie: ném `BusinessException(ErrorCode.INVALID_REFRESH_TOKEN)`, tức `401 AUTH_004`. Đọc cookie bằng `@CookieValue(name = "refresh_token", required = false)` để không rơi vào `MissingRequestCookieException` (400, không có `code`).
+`/refresh` or `/logout` without a cookie throws `BusinessException(ErrorCode.INVALID_REFRESH_TOKEN)`, i.e. `401 AUTH_004`. The cookie is read with `@CookieValue(name = "refresh_token", required = false)` so the request does not fall into `MissingRequestCookieException` (400, no `code`).
 
-Với `/refresh`, đây là đường đi bình thường mỗi lần app khởi động khi người dùng chưa đăng nhập.
+For `/refresh` this is the normal path on every startup of a user who is not logged in.
 
-### Test backend
+### Backend tests
 
-Cập nhật `AuthControllerIntegrationTest`:
+`AuthControllerIntegrationTest`:
 
-1. Login: có `Set-Cookie` với đủ thuộc tính ở trên. Body không có `refreshToken`.
-2. Refresh có cookie: `200`, có cookie mới, giá trị khác cookie cũ.
-3. Refresh không có cookie: `401 AUTH_004`. Test này xanh cả khi chưa có check, vì `findByTokenForUpdate(null)` sinh `where token = NULL`, không khớp dòng nào. Vẫn viết check tường minh, đừng lấy test xanh làm bằng chứng.
-4. Dùng lại cookie đã bị rotate: `401 AUTH_006`.
-5. Logout: cookie bị xoá, `Max-Age=0` và `Path=/api/auth`.
-6. Logout-all: cookie bị xoá như trên.
+1. Login: `Set-Cookie` with every attribute above. The body has no `refreshToken`.
+2. Refresh with a cookie: `200`, a new cookie whose value differs from the old one.
+3. Refresh without a cookie: `401 AUTH_004`. This test passes even without the check, because `findByTokenForUpdate(null)` produces `where token = NULL`, which matches no row. Write the explicit check anyway; a green test is not proof here.
+4. Reusing a rotated cookie: `401 AUTH_006`.
+5. Logout: the cookie is cleared with `Max-Age=0` and `Path=/api/auth`.
+6. Logout-all: the cookie is cleared the same way.
 
-Cập nhật `docs/postman/taskflow-auth.postman_collection.json` và `src/test/http/auth.http`: bỏ `refreshToken` khỏi body của `/refresh` và `/logout`. Sửa mã mong đợi của request "dùng lại refresh token đã rotate" từ `AUTH_005` thành `AUTH_006` (`AUTH_005` là hết hạn).
+Update `docs/postman/taskflow-auth.postman_collection.json` and `src/test/http/auth.http`: remove `refreshToken` from the `/refresh` and `/logout` bodies. Change the expected code of the "reuse a rotated refresh token" request from `AUTH_005` to `AUTH_006` (`AUTH_005` means expired).
 
-### Rủi ro
+### Risks
 
-Safari có thể không nhận cookie `Secure` trên `http://localhost`. Giữ `Secure` cố định. Kế hoạch có bước kiểm tra cookie được lưu trên trình duyệt đang dùng. Chỉ khi bước đó thất bại mới thêm cấu hình tắt `Secure` cho môi trường dev.
+Safari may reject a `Secure` cookie on `http://localhost`. `Secure` stays fixed. The plan includes a step that checks the cookie is stored in the browser in use. Only if that step fails, add configuration to drop `Secure` in development.
 
-Cookie jar của curl và Postman có thể xử lý cookie `Secure` trên `http` khác trình duyệt. Nếu cookie không được gửi lại, truyền tay `-H 'Cookie: refresh_token=...'` trước khi kết luận code sai.
+The curl and Postman cookie jars may treat a `Secure` cookie over `http` differently from browsers. If the cookie is not sent back, pass it manually with `-H 'Cookie: refresh_token=...'` before concluding the code is wrong.
 
-**Refresh đồng thời với cùng một cookie.** Cookie dùng chung giữa các tab. Hai tab khởi động cùng lúc, hoặc F5 hai lần liên tiếp, gửi cùng cookie lên `/refresh`. Lock bi quan bắt request thứ hai chờ, rồi nó thấy token đã bị thu hồi và nhận `AUTH_006`, nên tab đó khởi động ở trạng thái chưa đăng nhập. Nếu trình duyệt huỷ request đầu trước khi xử lý `Set-Cookie`, cookie còn lại là token đã chết và người dùng bị đăng xuất hẳn. Giới hạn đã biết, không sửa trong slice này. Đây là câu hỏi grace window trong roadmap, và phải giải trước khi làm phát hiện tái sử dụng, nếu không một lần F5 đôi sẽ thu hồi mọi phiên.
+**Concurrent refresh with the same cookie.** The cookie is shared across tabs. Two tabs starting at once, or two quick reloads, send the same cookie to `/refresh`. The pessimistic lock makes the second request wait; it then sees the token revoked and gets `AUTH_006`, so that tab starts unauthenticated. If the browser cancels the first request before it processes `Set-Cookie`, the remaining cookie holds a dead token and the user is fully logged out. Known limitation, not fixed in this slice. This is the grace-window question in the roadmap, and it must be answered before reuse detection is added; otherwise a double reload would revoke every session.
 
-## Phần 2: Frontend
+## Part 2: Frontend
 
-### Các đơn vị
+### Units
 
-| File | Trách nhiệm | Phụ thuộc |
+| File | Responsibility | Depends on |
 |---|---|---|
-| `AuthApi` (sửa) | HTTP thuần. `login()` trả `{ accessToken }`, thêm `refresh()` và `me()` | `HttpClient` |
-| `AuthStore` (mới) | Giữ trạng thái đăng nhập, điều phối login và khôi phục phiên | `AuthApi` |
-| `authInterceptor` (mới) | Gắn `Authorization: Bearer <token>` khi có token | `AuthStore` |
-| `Login` (sửa) | Form và hiển thị lỗi. Gọi `AuthStore.login()` rồi chuyển về `/` | `AuthStore`, `Router` |
-| `Home` (mới) | Route `''`. Hiện `username` nếu đã đăng nhập, ngược lại hiện link tới `/login` | `AuthStore` |
+| `AuthApi` (changed) | HTTP only. `login()` returns `{ accessToken }`; adds `refresh()` and `me()` | `HttpClient` |
+| `AuthStore` (new) | Holds authentication state; coordinates login and session restore | `AuthApi` |
+| `authInterceptor` (new) | Attaches `Authorization: Bearer <token>` when a token exists | `AuthStore` |
+| `Login` (changed) | Form and error display. Calls `AuthStore.login()`, then navigates to `/` | `AuthStore`, `Router` |
+| `Home` (new) | Route `''`. Shows `username` when logged in, otherwise a link to `/login` | `AuthStore` |
 
-### Kiểu dữ liệu
+### Types
 
 ```ts
 interface AccessTokenResponse { accessToken: string }
 interface User { id: number; email: string; username: string }
 ```
 
-`User` chỉ khai báo field UI dùng. Backend trả thêm `enabled`, `createdAt`, `modifiedAt`, không ảnh hưởng.
+`User` declares only the fields the UI uses. The backend also returns `enabled`, `createdAt` and `modifiedAt`; that has no effect.
 
 ### AuthStore
 
 ```
-private, ghi được
+private, writable
   accessToken : signal<string | null>
   currentUser : signal<User | null>
 
-public, chỉ đọc
+public, read-only
   accessToken
   currentUser
   isAuthenticated = computed(() => currentUser() !== null)
 
-method
+methods
   login(credentials: LoginRequest): Promise<void>
   restoreSession(): Promise<void>
 ```
 
-- Decorator `@Service()`.
-- Bên ngoài chỉ đọc state. Mọi thay đổi trạng thái đi qua method của store.
-- Method trả `Promise`, vì nơi gọi là action `async` của form và app initializer. Bên trong dùng `firstValueFrom`.
+- `@Service()` decorator.
+- Callers can only read state. Every state change goes through a store method.
+- Methods return `Promise`, because the callers are the form's `async` action and the app initializer. Internally they use `firstValueFrom`.
 
-### Luồng login
+### Login flow
 
 ```
 Login.action
   → authStore.login(credentials)
       → AuthApi.login()  → set accessToken
-      → AuthApi.me()     → set currentUser      (interceptor gắn token)
+      → AuthApi.me()     → set currentUser      (interceptor attaches the token)
   → router.navigate(['/'])
 ```
 
-Tất cả hoặc không gì cả: nếu `me()` thất bại, store đặt `accessToken` về `null` rồi ném lỗi tiếp. Không bao giờ có trạng thái có token mà không có user.
+All or nothing: if `me()` fails, the store sets `accessToken` back to `null` and rethrows. There is never a token without a user.
 
-Store không nuốt lỗi của `login()`. `HttpErrorResponse` đi nguyên vẹn lên `Login`, phần ánh xạ `AUTH_001` giữ nguyên.
+The store does not swallow errors from `login()`. The `HttpErrorResponse` reaches `Login` unchanged, and the existing `AUTH_001` mapping stays.
 
-### Luồng khởi động
+### Startup flow
 
 ```
 app.config.ts
@@ -160,12 +160,12 @@ app.config.ts
 restoreSession
   → AuthApi.refresh() → set accessToken
   → AuthApi.me()      → set currentUser
-  lỗi bất kỳ          → cả hai về null, không ném lỗi
+  any error           → both null, never throws
 ```
 
-- `provideAppInitializer` chặn render đến khi promise xong, nên trang đầu tiên luôn thấy đúng trạng thái.
-- `restoreSession` không bao giờ ném lỗi. Chưa đăng nhập, cookie hết hạn, backend tắt đều là tình huống bình thường.
-- Cookie tự đi kèm `/refresh` vì qua proxy dev, mọi request đều cùng origin `localhost:4200`. Không cần `withCredentials`.
+- `provideAppInitializer` blocks rendering until the promise settles, so the first page always sees the correct state.
+- `restoreSession` never throws. Not logged in, expired cookie and backend down are all normal.
+- The cookie is sent to `/refresh` automatically because, through the dev proxy, every request has the same origin `localhost:4200`. No `withCredentials` is needed.
 
 ### Interceptor
 
@@ -174,45 +174,45 @@ const token = inject(AuthStore).accessToken();
 return next(token ? req.clone({ setHeaders: { Authorization: `Bearer ${token}` } }) : req);
 ```
 
-Đăng ký trong `app.config.ts`: `provideHttpClient(withInterceptors([authInterceptor]))`.
+Registered in `app.config.ts`: `provideHttpClient(withInterceptors([authInterceptor]))`.
 
-Vòng phụ thuộc `AuthStore → AuthApi → HttpClient → interceptor → AuthStore` không gây lỗi khi khởi tạo, vì functional interceptor chỉ gọi `inject()` khi có request. Test interceptor phải xác nhận điều này.
+The dependency cycle `AuthStore → AuthApi → HttpClient → interceptor → AuthStore` does not fail at construction, because a functional interceptor calls `inject()` only when a request is made. The interceptor test must confirm this.
 
-### Xử lý lỗi
+### Error handling
 
-| Tình huống | Kết quả |
+| Case | Result |
 |---|---|
-| Sai mật khẩu | `AUTH_001` lên `Login`, hiện message như hiện tại |
-| `me()` lỗi sau khi login được | Store xoá token, `Login` hiện message chung |
-| Khởi động, không có cookie | `401 AUTH_004`, app khởi động ở trạng thái chưa đăng nhập |
-| Khởi động, backend tắt | Proxy trả `502`, app khởi động ở trạng thái chưa đăng nhập |
-| Khởi động, backend treo | App đứng ở màn hình trắng. Giới hạn đã biết, xem Phạm vi |
+| Wrong password | `AUTH_001` reaches `Login`, shown as today |
+| `me()` fails after a successful login | The store clears the token; `Login` shows the generic message |
+| Startup, no cookie | `401 AUTH_004`; the app starts unauthenticated |
+| Startup, backend down | The proxy returns `502`; the app starts unauthenticated |
+| Startup, backend hangs | The app stays on a blank screen. Known limitation, see Scope |
 
-### Gỡ bỏ
+### Removed
 
-- Field `refreshToken` trong kiểu `LoginResponse`. Đổi tên kiểu thành `AccessTokenResponse`.
-- `console.log(tokens)` trong `Login`.
-- `Login` không còn inject `AuthApi`.
+- The `refreshToken` field of `LoginResponse`. The type is renamed `AccessTokenResponse`.
+- `console.log(tokens)` in `Login`.
+- `Login` no longer injects `AuthApi`.
 
-### Test frontend
+### Frontend tests
 
-`AuthStore`, mock `AuthApi`:
-1. `login()` thành công: có `accessToken` và `currentUser`, `isAuthenticated` là `true`.
-2. `me()` lỗi trong `login()`: `accessToken` là `null`, lỗi được ném ra.
-3. `restoreSession()` thành công: có token và user.
-4. `restoreSession()` khi `refresh()` lỗi: không ném lỗi, `isAuthenticated` là `false`.
+`AuthStore`, with `AuthApi` mocked:
+1. Successful `login()`: `accessToken` and `currentUser` are set; `isAuthenticated` is `true`.
+2. `me()` fails inside `login()`: `accessToken` is `null` and the error is rethrown.
+3. Successful `restoreSession()`: token and user are set.
+4. `restoreSession()` when `refresh()` fails: does not throw; `isAuthenticated` is `false`.
 
-`authInterceptor`, dùng `HttpTestingController`:
-5. Có token: request có header `Authorization: Bearer <token>`.
-6. Không có token: request không có header `Authorization`.
+`authInterceptor`, with `HttpTestingController`:
+5. With a token: the request has `Authorization: Bearer <token>`.
+6. Without a token: the request has no `Authorization` header.
 
-`Login`, đổi mock từ `AuthApi` sang `AuthStore`:
-7. Hai test hiện có giữ nguyên ý nghĩa.
-8. Login thành công: `router.navigate` được gọi với `['/']`.
+`Login`, mock changed from `AuthApi` to `AuthStore`:
+7. The three existing tests keep their meaning.
+8. Successful login: `router.navigate` is called with `['/']`.
 
-## Thứ tự thực hiện
+## Order of work
 
-1. Backend, kèm test backend.
-2. Kiểm tra bằng Postman hoặc `curl`: cookie được ghi và xoá đúng.
-3. Frontend, kèm test frontend.
-4. Kiểm tra trên trình duyệt: đăng nhập, reload vẫn còn đăng nhập, cookie không đọc được bằng `document.cookie`.
+1. ~~Backend, with backend tests.~~ Done: XuanNam58/taskflow-backend#9.
+2. ~~Check with Postman or `curl` that the cookie is set and cleared correctly.~~ Done: XuanNam58/taskflow-backend#10.
+3. Frontend, with frontend tests.
+4. Browser check: log in, reload and stay logged in, confirm `document.cookie` cannot read the cookie.
