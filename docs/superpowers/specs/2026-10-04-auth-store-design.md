@@ -12,7 +12,7 @@ Sau khi đăng nhập, app nhớ được người dùng là ai, kể cả khi r
 
 - `POST /api/auth/login` trả `{ accessToken, refreshToken }` trong JSON body.
 - `/refresh` và `/logout` nhận refresh token trong body.
-- Access token sống 15 phút, refresh token sống 30 ngày, có rotation và phát hiện token bị dùng lại.
+- Access token sống 15 phút, refresh token sống 30 ngày, có rotation. Token đã rotate bị từ chối (`401 AUTH_006`), nhưng **chưa có phát hiện tái sử dụng**: token mới thay thế nó vẫn hợp lệ. Việc này nằm trong backlog bắt buộc trước khi deploy công khai.
 - `GET /api/users/me` cần header `Authorization: Bearer <access token>`.
 - Frontend: `Login` gọi `AuthApi.login()` rồi `console.log` token. Token chưa được lưu ở đâu.
 - Backend tắt CSRF (`csrf.disable()`), chạy stateless.
@@ -50,6 +50,8 @@ refresh_token=<token>; HttpOnly; Secure; SameSite=Strict; Path=/api/auth; Max-Ag
 
 Dựng bằng `org.springframework.http.ResponseCookie`, không thêm thư viện.
 
+Cookie xoá phải trùng `Path=/api/auth` với cookie đã ghi: trình duyệt nhận diện cookie theo name + domain + path (RFC 6265 §5.3, bước 11). Cookie ghi và cookie xoá dựng từ cùng một chỗ, chỉ khác `Max-Age`.
+
 ### Endpoint
 
 | Endpoint | Request | Response |
@@ -57,9 +59,12 @@ Dựng bằng `org.springframework.http.ResponseCookie`, không thêm thư việ
 | `POST /api/auth/login` | không đổi | ghi cookie, body `{ accessToken }` |
 | `POST /api/auth/refresh` | không có body, đọc cookie `refresh_token` | ghi cookie mới (rotation), body `{ accessToken }` |
 | `POST /api/auth/logout` | không có body, đọc cookie `refresh_token`, vẫn cần access token | xoá cookie bằng `Max-Age=0`, `204` |
-| `/register`, `/logout-all` | không đổi | không đổi |
+| `POST /api/auth/logout-all` | không đổi | xoá cookie bằng `Max-Age=0`, `204` |
+| `/register` | không đổi | không đổi |
 
 `/logout` phải sửa ngay trong slice này: frontend không còn đọc được refresh token để gửi qua body.
+
+Khi `/logout` hoặc `/refresh` thất bại, response lỗi không xoá cookie. Cookie chết nằm lại đến hết `Max-Age`, lần khởi động sau nhận `401` và app ở trạng thái chưa đăng nhập. Chấp nhận trong slice này.
 
 DTO mới: `AccessTokenResponse(String accessToken)`, dùng chung cho `/login` và `/refresh`. `RefreshTokenRequest` và `LogoutRequest` giữ lại cho service, controller tự dựng chúng từ cookie.
 
@@ -75,15 +80,20 @@ Cập nhật `AuthControllerIntegrationTest`:
 
 1. Login: có `Set-Cookie` với đủ thuộc tính ở trên. Body không có `refreshToken`.
 2. Refresh có cookie: `200`, có cookie mới, giá trị khác cookie cũ.
-3. Refresh không có cookie: `401 AUTH_004`.
-4. Dùng lại cookie đã bị rotate: bị từ chối với mã như hiện tại.
-5. Logout: cookie bị xoá (`Max-Age=0`).
+3. Refresh không có cookie: `401 AUTH_004`. Test này xanh cả khi chưa có check, vì `findByTokenForUpdate(null)` sinh `where token = NULL`, không khớp dòng nào. Vẫn viết check tường minh, đừng lấy test xanh làm bằng chứng.
+4. Dùng lại cookie đã bị rotate: `401 AUTH_006`.
+5. Logout: cookie bị xoá, `Max-Age=0` và `Path=/api/auth`.
+6. Logout-all: cookie bị xoá như trên.
 
-Cập nhật `docs/postman/taskflow-auth.postman_collection.json`: bỏ `refreshToken` khỏi body của `/refresh` và `/logout`.
+Cập nhật `docs/postman/taskflow-auth.postman_collection.json` và `src/test/http/auth.http`: bỏ `refreshToken` khỏi body của `/refresh` và `/logout`. Sửa mã mong đợi của request "dùng lại refresh token đã rotate" từ `AUTH_005` thành `AUTH_006` (`AUTH_005` là hết hạn).
 
 ### Rủi ro
 
 Safari có thể không nhận cookie `Secure` trên `http://localhost`. Giữ `Secure` cố định. Kế hoạch có bước kiểm tra cookie được lưu trên trình duyệt đang dùng. Chỉ khi bước đó thất bại mới thêm cấu hình tắt `Secure` cho môi trường dev.
+
+Cookie jar của curl và Postman có thể xử lý cookie `Secure` trên `http` khác trình duyệt. Nếu cookie không được gửi lại, truyền tay `-H 'Cookie: refresh_token=...'` trước khi kết luận code sai.
+
+**Refresh đồng thời với cùng một cookie.** Cookie dùng chung giữa các tab. Hai tab khởi động cùng lúc, hoặc F5 hai lần liên tiếp, gửi cùng cookie lên `/refresh`. Lock bi quan bắt request thứ hai chờ, rồi nó thấy token đã bị thu hồi và nhận `AUTH_006`, nên tab đó khởi động ở trạng thái chưa đăng nhập. Nếu trình duyệt huỷ request đầu trước khi xử lý `Set-Cookie`, cookie còn lại là token đã chết và người dùng bị đăng xuất hẳn. Giới hạn đã biết, không sửa trong slice này. Đây là câu hỏi grace window trong roadmap, và phải giải trước khi làm phát hiện tái sử dụng, nếu không một lần F5 đôi sẽ thu hồi mọi phiên.
 
 ## Phần 2: Frontend
 
