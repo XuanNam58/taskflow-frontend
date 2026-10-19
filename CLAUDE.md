@@ -92,22 +92,31 @@ Token logic must never be scattered across components.
 
 | File | Responsibility |
 |---|---|
-| `AuthApiService` | HTTP calls only |
-| `AuthStore` | current authentication state |
-| `AuthInterceptor` | Authorization header, refresh on expiry |
-| `AuthGuard` | route protection |
-| `LoginComponent` | form and UI only |
+| `AuthApi` | HTTP calls only |
+| `AuthStore` | current authentication state; the access token lives here, in memory only |
+| `authInterceptor` | Authorization header, refresh on expiry |
+| `authGuard` | route protection |
+| `Login` | form and UI only |
 
 ## Backend API contract
 
-Base URL `http://localhost:8080`. The interceptor branches on the `code` field of the error body,
-never on the HTTP status alone — several different failures all return 401.
+Call relative paths (`/api/...`), never `http://localhost:8080`. `ng serve` forwards `/api/**` to the
+backend through `proxy.conf.json`, so the browser sees one origin, `localhost:4200`. An absolute
+backend URL makes every call cross-origin: CORS blocks it and the refresh cookie is never stored.
+
+The refresh token is an httpOnly cookie (`refresh_token`, `Path=/api/auth`) that JavaScript cannot
+read. The browser stores it on login and sends it to `/refresh` and `/logout` by itself, so no code here
+touches it and `withCredentials` is not needed. `/login` and `/refresh` return only `{ accessToken }`.
+Never put the access token in `localStorage` or `sessionStorage`.
+
+The interceptor branches on the `code` field of the error body, never on the HTTP status alone —
+several different failures all return 401.
 
 | Response | Meaning | Frontend action |
 |---|---|---|
 | `401 AUTH_002` | access token invalid or tampered | log out |
 | `401 AUTH_003` | access token expired | call `POST /api/auth/refresh`, retry the original request |
-| `401 AUTH_004` | refresh token invalid, or not the caller's | log out |
+| `401 AUTH_004` | refresh cookie missing or invalid, or not the caller's | log out; on app startup this just means "not logged in" |
 | `401 AUTH_005` | refresh token expired | log out |
 | `401 AUTH_006` | refresh token already revoked | log out |
 | `403 AUTH_007` | account disabled | show a message, then log out |
@@ -119,7 +128,7 @@ Endpoints: `POST /api/auth/register`, `/api/auth/login`, `/api/auth/refresh`, `/
 ## Git
 
 - Commits: `type(scope): message`, e.g. `feat(auth): add login form`.
-- One branch per vertical slice. Never commit straight to `main`; merge through a pull request.
+- One branch per vertical slice. Never commit straight to `master` (this repo's default branch); merge through a pull request.
 
 ## How to work with me
 
