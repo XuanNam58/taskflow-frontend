@@ -7,16 +7,29 @@ export interface LoginRequest {
   password: string;
 }
 
-export interface LoginResponse {
+export interface AccessTokenResponse {
   accessToken: string;
-  refreshToken: string;
+}
+
+export interface User {
+  id: number;
+  email: string;
+  username: string;
 }
 
 @Service()
 export class AuthApi {
   private readonly http = inject(HttpClient);
 
-  login(request: LoginRequest): Observable<LoginResponse> {
-    return this.http.post<LoginResponse>('/api/auth/login', request);
+  login(request: LoginRequest): Observable<AccessTokenResponse> {
+    return this.http.post<AccessTokenResponse>('/api/auth/login', request);
+  }
+
+  refresh(): Observable<AccessTokenResponse> {
+    return this.http.post<AccessTokenResponse>('/api/auth/refresh', null);
+  }
+
+  me(): Observable<User> {
+    return this.http.get<User>('/api/users/me');
   }
 }
