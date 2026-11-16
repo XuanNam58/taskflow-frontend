@@ -81,6 +81,7 @@ Naming hint: the private writable signal and the public read-only one cannot sha
   | 2 | `login` succeeds, `me` fails | `store.login(creds)` | the promise rejects (`await expect(...).rejects.toBeInstanceOf(HttpErrorResponse)`), `accessToken()` is `null`, `isAuthenticated()` is `false` |
   | 3 | `refresh` → `{ accessToken: 'abc' }`, `me` → a `User` | `await store.restoreSession()` | token and user are set |
   | 4 | `refresh` fails | `store.restoreSession()` | the promise resolves (`await expect(...).resolves.toBeUndefined()`), `isAuthenticated()` is `false`, `me` was not called |
+  | 4b | `refresh` → `{ accessToken: 'abc' }`, `me` fails | `await store.restoreSession()` | `accessToken()` is `null`, `isAuthenticated()` is `false` |
 
 - [ ] **Step 4: Run, expect red.** `npx ng test --watch=false --include src/app/auth/auth-store.spec.ts --reporters=verbose` → FAIL (methods do not exist).
 - [ ] **Step 5: Implement the store** until 1–4 pass.
@@ -205,7 +206,7 @@ git commit -m "feat(auth): restore session on startup and add Home"
 
 ### Task 5: Finish the slice
 
-- [ ] Full suite: `npx ng test --watch=false` → expected 14 tests (6 existing + 4 store + 2 interceptor + 1 navigate + 1 home; the AUTH_001 test gains an assertion, not a new test). Report PASS/FAIL/SKIP.
+- [ ] Full suite: `npx ng test --watch=false` → expected 15 tests (6 existing + 5 store + 2 interceptor + 1 navigate + 1 home; the AUTH_001 test gains an assertion, not a new test). Report PASS/FAIL/SKIP.
 - [ ] `npx ng build` succeeds.
 - [ ] Update the spec status line to "frontend done" and strike step 3–4 of *Order of work*.
 - [ ] Push `feat/auth-store`, open one PR against `master`.

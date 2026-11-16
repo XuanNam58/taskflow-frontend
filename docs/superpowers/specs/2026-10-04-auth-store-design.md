@@ -201,6 +201,7 @@ The dependency cycle `AuthStore → AuthApi → HttpClient → interceptor → A
 2. `me()` fails inside `login()`: `accessToken` is `null` and the error is rethrown.
 3. Successful `restoreSession()`: token and user are set.
 4. `restoreSession()` when `refresh()` fails: does not throw; `isAuthenticated` is `false`.
+4b. `restoreSession()` when `refresh()` succeeds but `me()` fails: does not throw; `accessToken` is `null`. Added during implementation: test 4 alone stays green when the `catch` forgets to clear the token.
 
 `authInterceptor`, with `HttpTestingController`:
 5. With a token: the request has `Authorization: Bearer <token>`.
