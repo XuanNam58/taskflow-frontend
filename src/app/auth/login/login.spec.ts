@@ -1,22 +1,26 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { AuthApi } from '../auth-api';
 import { Login } from './login';
-import { throwError } from 'rxjs';
 import { HttpErrorResponse } from '@angular/common/http';
+import { AuthStore } from '../auth-store';
+import { provideRouter, Router } from '@angular/router';
 
 describe('Login', () => {
   let component: Login;
   let fixture: ComponentFixture<Login>;
-  let authApi: { login: ReturnType<typeof vi.fn> };
+  let authStore: { login: ReturnType<typeof vi.fn> };
+  let navigate: ReturnType<typeof vi.spyOn>;
 
   beforeEach(async () => {
-    authApi = { login: vi.fn() };
+    authStore = { login: vi.fn() };
 
     await TestBed.configureTestingModule({
       imports: [Login],
-      providers: [{ provide: AuthApi, useValue: authApi }],
+      providers: [{ provide: AuthStore, useValue: authStore },
+      provideRouter([])
+      ],
     }).compileComponents();
 
+    navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
     fixture = TestBed.createComponent(Login);
     component = fixture.componentInstance;
     await fixture.whenStable();
@@ -32,30 +36,42 @@ describe('Login', () => {
     form.dispatchEvent(new Event('submit'));
     await fixture.whenStable();
 
-    expect(authApi.login).not.toHaveBeenCalled();
+    expect(authStore.login).not.toHaveBeenCalled();
     expect(fixture.nativeElement.querySelectorAll('[role="alert"]').length).toBe(2);
   });
 
-  it('should show credentials error when API returns AUTH_001', async () => {
+  it('should show credentials error when login rejects with AUTH_001', async () => {
     const form: HTMLFormElement = fixture.nativeElement.querySelector('form');
     component.loginModel.set({ email: 'test@example.com', password: 'wrong' });
-    authApi.login.mockReturnValue(
-      throwError(
-        () =>
-          new HttpErrorResponse({
-            status: 401,
-            error: { code: 'AUTH_001' },
-          }),
-      ),
+
+    authStore.login.mockRejectedValue(
+      new HttpErrorResponse({
+        status: 401,
+        error: { code: 'AUTH_001' }
+      }),
     );
 
     form.dispatchEvent(new Event('submit'));
     await fixture.whenStable();
 
-    expect(authApi.login).toHaveBeenCalledWith({ email: 'test@example.com', password: 'wrong' });
+    expect(authStore.login).toHaveBeenCalledWith({ email: 'test@example.com', password: 'wrong' });
     expect(fixture.nativeElement.querySelectorAll('[role="alert"]').length).toBe(1);
     expect(fixture.nativeElement.querySelector('[role="alert"]').textContent).toContain(
       'Invalid email or password',
     );
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it('should navigate home after a successful login', async () => {
+    const form: HTMLFormElement = fixture.nativeElement.querySelector('form');
+    component.loginModel.set({ email: 'test@example.com', password: 'valid' });
+
+    authStore.login.mockResolvedValue(undefined);
+
+    form.dispatchEvent(new Event('submit'));
+    await fixture.whenStable();
+
+    expect(authStore.login).toHaveBeenCalledWith({ email: 'test@example.com', password: 'valid' });
+    expect(navigate).toHaveBeenCalledWith(['/']);
   });
 });
