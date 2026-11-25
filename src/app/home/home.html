@@ -1,0 +1,5 @@
+@if (authStore.currentUser(); as user) {
+    <p>Welcome, {{ user.username }}!</p>
+} @else {
+    <a routerLink="/login">Login</a>
+}

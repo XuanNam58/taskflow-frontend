@@ -1,8 +1,9 @@
 import { Component, inject, signal } from '@angular/core';
 import { email, form, required, FormField, FormRoot } from '@angular/forms/signals';
-import { AuthApi, LoginRequest } from '../auth-api';
-import { firstValueFrom } from 'rxjs';
+import { LoginRequest } from '../auth-api';
 import { HttpErrorResponse } from '@angular/common/http';
+import { AuthStore } from '../auth-store';
+import { Router } from '@angular/router';
 
 @Component({
   imports: [FormField, FormRoot],
@@ -10,7 +11,8 @@ import { HttpErrorResponse } from '@angular/common/http';
   templateUrl: './login.html',
 })
 export class Login {
-  private readonly authApi = inject(AuthApi);
+  private readonly authStore = inject(AuthStore);
+  private readonly router = inject(Router);
 
   loginModel = signal<LoginRequest>({
     email: '',
@@ -28,8 +30,8 @@ export class Login {
       submission: {
         action: async (field) => {
           try {
-            const tokens = await firstValueFrom(this.authApi.login(field().value()));
-            console.log(tokens);
+            await this.authStore.login(field().value());
+            await this.router.navigate(['/']);
             return;
           } catch (err) {
             if (err instanceof HttpErrorResponse && err.error?.code === 'AUTH_001') {
