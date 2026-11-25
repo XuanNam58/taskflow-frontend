@@ -1,7 +1,7 @@
 # AuthStore and an httpOnly refresh-token cookie
 
 - Date: 2026-10-04
-- Status: backend done (XuanNam58/taskflow-backend#9, #10); frontend approved, not started
+- Status: backend done (XuanNam58/taskflow-backend#9, #10); frontend done (branch `feat/auth-store`)
 - Repositories: `taskflow-backend`, `taskflow-frontend`
 
 ## Goal
@@ -215,5 +215,5 @@ The dependency cycle `AuthStore → AuthApi → HttpClient → interceptor → A
 
 1. ~~Backend, with backend tests.~~ Done: XuanNam58/taskflow-backend#9.
 2. ~~Check with Postman or `curl` that the cookie is set and cleared correctly.~~ Done: XuanNam58/taskflow-backend#10.
-3. Frontend, with frontend tests.
-4. Browser check: log in, reload and stay logged in, confirm `document.cookie` cannot read the cookie.
+3. ~~Frontend, with frontend tests.~~ Done: 15 tests, branch `feat/auth-store`.
+4. ~~Browser check: log in, reload and stay logged in, confirm `document.cookie` cannot read the cookie.~~ Done.

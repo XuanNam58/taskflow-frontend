@@ -115,7 +115,7 @@ git commit -m "feat(auth): add AuthStore with login and session restore"
   | # | Steps | Then |
   |---|---|---|
   | 5 | `const done = store.login(creds)`; `expectOne('/api/auth/login').flush({ accessToken: 'abc' })`; wait for the `/me` request; `await done` after flushing it | the `/api/users/me` request has header `Authorization` = `Bearer abc` |
-  | 6 | `store.login(creds)` without flushing | the `/api/auth/login` request has no `Authorization` header (`req.request.headers.has('Authorization')` is `false`); flush it with an error or a value so `verify()` passes |
+  | 6 | inject `HttpClient`; `httpClient.get('/test').subscribe()` with no token in the store | the `/test` request has no `Authorization` header (`req.request.headers.has('Authorization')` is `false`); flush it so `verify()` passes. Changed during implementation: calling `HttpClient` directly isolates the interceptor from `AuthStore.login` |
 
   Timing hint for 5: the `/me` request is sent only after the `login` promise continues, which happens on a later microtask. `expectOne` called immediately after the first flush will fail. Wait first (hint level 1: `await` something; ask for level 2 if stuck).
 
