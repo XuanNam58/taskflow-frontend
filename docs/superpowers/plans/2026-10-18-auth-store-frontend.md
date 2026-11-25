@@ -171,7 +171,7 @@ git commit -m "feat(auth): log in through AuthStore and navigate home"
 
 **Mental model.** `provideAppInitializer` runs a function during bootstrap; if it returns a Promise, Angular waits for it before rendering the first route. That is why `restoreSession` must never reject: a rejected initializer stops the app from booting.
 
-**Read:** angular.dev → API `provideAppInitializer` (`/api/core/provideAppInitializer`); *Guide › Routing › Define routes* (`/guide/routing/define-routes`, lazy `loadComponent`); `RouterLink` API (`/api/router/RouterLink`).
+**Read:** angular.dev → API `provideAppInitializer` (`/api/core/provideAppInitializer`); *Guide › Routing › Navigate to routes* → section *How to use RouterLink* (`/guide/routing/navigate-to-routes#how-to-use-routerlink`). Lazy `loadComponent`: copy the existing `login` route; background in *Route Loading Strategies* (`/guide/routing/loading-strategies`).
 
 **Files:**
 - Create: `src/app/home/home.ts`, `home.html`, `home.scss`, `home.spec.ts` (`npx ng generate component home`)
